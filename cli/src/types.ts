@@ -23,7 +23,7 @@ export type ApiResponse<T> = {
  * Message format for agent interactions
  */
 export type Message = {
-  readonly role: 'user' | 'assistant' | 'system';
+  readonly role: "user" | "assistant" | "system";
   readonly content: string;
 };
 
@@ -48,7 +48,7 @@ export type FeatureRequest = {
  * Deployment request
  */
 export type DeploymentRequest = {
-  readonly platform: 'vercel' | 'netlify' | 'github' | string;
+  readonly platform: "vercel" | "netlify" | "github" | string;
   readonly projectPath?: string;
 };
 
@@ -61,4 +61,24 @@ export type AgentResponse = {
     readonly path: string;
     readonly content: string;
   }[];
+};
+
+/**
+ * Workflow step status type
+ */
+export type WorkflowStepStatus = 'pending' | 'running' | 'completed' | 'failed' | 'suspended';
+
+/**
+ * Workflow status update from monitoring
+ */
+export type WorkflowStatusUpdate = {
+  readonly runId: string;
+  readonly status: string;
+  readonly results: Record<string, any>;
+  readonly activePaths: Map<string, {
+    readonly status: string;
+    readonly suspendPayload?: any;
+    readonly stepPath: string[];
+  }>;
+  readonly timestamp: number;
 };
