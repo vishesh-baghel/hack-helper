@@ -9,7 +9,7 @@ import { persistPlanTool } from "../tools";
  * Uses the component breakdown from BriefParserAgent to generate a detailed plan
  */
 export const plannerAgent = new Agent({
-  name: "PlannerAgent",
+  name: "Planner",
   instructions: `
     ### ROLE DEFINITION
     You are a Project Planner agent for hack-helper. Your primary role is to create a comprehensive, step-by-step roadmap for implementing projects based on the component breakdown provided by the BriefParserAgent. Your key responsibilities include ensuring the roadmap is logical, efficient, and aligned with project goals. The primary stakeholders are project managers, developers, and UX designers.

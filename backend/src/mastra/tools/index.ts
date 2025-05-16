@@ -1,5 +1,8 @@
 // Export all tools used by hack-helper agents
 
+// Agent communication tools
+export { delegateToAgentTool } from './agent-delegation.tool';
+
 // PlannerAgent tools
 export { persistPlanTool } from './persist-plan.tool';
 

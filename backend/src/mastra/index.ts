@@ -11,12 +11,16 @@ import { featureEnhancerAgent } from "./agents/feature-enhancer.agent";
 import { boardPublisherAgent } from "./agents/board-publisher.agent";
 import { deployerAgent } from "./agents/deployer.agent";
 
+// Import tools
+import { delegateToAgentTool } from "./tools/agent-delegation.tool";
+
 /**
  * Main Mastra instance for hack-helper
  * This configures all agents and their dependencies
  */
-export const mastra = new Mastra({
+export const mastra: Mastra = new Mastra({
   agents: {
+    // Individual agents
     orchestratorAgent,
     briefExtractorAgent,
     briefParserAgent,
@@ -42,3 +46,6 @@ export const getAgents = () => mastra.getAgents();
  * Type definition for all available hack-helper agents
  */
 export type HackHelperAgents = ReturnType<typeof getAgents>;
+
+// Export tools for delegation
+export { delegateToAgentTool };

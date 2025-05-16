@@ -8,7 +8,7 @@ import { LibSQLStore } from "@mastra/libsql";
  * Takes a raw idea and transforms it into a well-organized project structure
  */
 export const briefExtractorAgent = new Agent({
-  name: "BriefExtractorAgent",
+  name: "BriefExtractor",
   instructions: `
     ### ROLE DEFINITION
     You are a Brief Extractor agent for hack-helper. Your primary role is to transform a user's high-level project idea into a structured project brief that can be parsed by other agents, such as the BriefParserAgent. Your key responsibilities include extracting essential project details and organizing them into a coherent format.

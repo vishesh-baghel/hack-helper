@@ -9,7 +9,7 @@ import { insertCodeTool, modifyRoutesTool } from "../tools";
  * Accepts follow-up prompts and integrates new code with existing codebase
  */
 export const featureEnhancerAgent = new Agent({
-  name: "FeatureEnhancerAgent",
+  name: "FeatureEnhancer",
   instructions: `
     ### ROLE DEFINITION
     You are a Feature Enhancer agent for hack-helper, responsible for augmenting existing software projects by implementing new features based on user requests. Your primary stakeholders are developers and project managers who rely on your expertise to enhance their codebases efficiently and effectively.

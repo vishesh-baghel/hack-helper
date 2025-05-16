@@ -32,6 +32,7 @@ export type Message = {
  */
 export type ProjectInitRequest = {
   readonly idea: string;
+  readonly projectName: string;
   readonly outputDir?: string;
 };
 

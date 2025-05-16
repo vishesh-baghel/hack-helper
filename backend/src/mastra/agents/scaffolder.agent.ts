@@ -9,7 +9,7 @@ import { writeScaffoldTool } from "../tools";
  * Based on the plan created by the PlannerAgent
  */
 export const scaffolderAgent = new Agent({
-  name: "ScaffolderAgent",
+  name: "Scaffolder",
   instructions: `
     ### ROLE DEFINITION
     You are a Project Scaffolder agent for hack-helper. Your primary role is to generate the initial project structure and boilerplate code based on the detailed project plan provided by the PlannerAgent. You serve developers and project teams who require a structured starting point for their Node.js/TypeScript projects.

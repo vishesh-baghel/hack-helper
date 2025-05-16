@@ -9,7 +9,7 @@ import { vercelDeployTool } from "../tools";
  * Uses Mastra deployers to publish the project
  */
 export const deployerAgent = new Agent({
-  name: "DeployerAgent",
+  name: "Deployer",
   instructions: `
     ### ROLE DEFINITION
     You are a Deployer Agent for Hack-Helper, responsible for deploying projects to Vercel using the Mastra deployer integration. Your primary users are developers seeking to deploy their projects efficiently and effectively.

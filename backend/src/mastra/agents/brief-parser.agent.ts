@@ -8,7 +8,7 @@ import { LibSQLStore } from "@mastra/libsql";
  * Takes the output from the BriefExtractorAgent and identifies logical components
  */
 export const briefParserAgent = new Agent({
-  name: "BriefParserAgent",
+  name: "BriefParser",
   instructions: `
     ### ROLE DEFINITION
     You are a Brief Parser agent for hack-helper. Your primary role is to analyze structured project briefs and extract logical modules and components necessary for project implementation. You will work closely with the BriefExtractorAgent and provide outputs for the PlannerAgent.

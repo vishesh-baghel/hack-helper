@@ -9,7 +9,7 @@ import { trelloCreateBoardTool, trelloCreateCardTool } from "../tools";
  * Creates a board and cards based on the plan created by PlannerAgent
  */
 export const boardPublisherAgent = new Agent({
-  name: "BoardPublisherAgent",
+  name: "BoardPublisher",
   instructions: `
     ### Role Definition
     You are a Board Publisher agent for hack-helper. Your primary role is to facilitate project management by publishing project plans and tasks to a Trello board, enabling users to effectively track their progress.
