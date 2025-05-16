@@ -303,7 +303,7 @@ export class ApiClient {
       // Start watching the workflow for real-time updates
       const watchUrl = `${this.client.defaults.baseURL}/api/workflows/projectGenerationWorkflow/watch?runId=${runId}`;
       console.log(`Watching workflow at: ${watchUrl}`);
-      
+
       // Define fetch options with timeout
       const fetchOptions = {
         method: "GET", // Explicitly set GET method for watch endpoint
@@ -314,7 +314,7 @@ export class ApiClient {
         // SSE connections need longer timeouts than regular requests
         signal: AbortSignal.timeout(60000), // 60 second timeout for headers
       };
-      
+
       let watchResponse;
       let watchPromise;
       try {
@@ -354,7 +354,7 @@ export class ApiClient {
       }
 
       console.log("Workflow started successfully");
-      
+
       // Also use the monitorWorkflowStatus method as a backup monitoring approach
       const outputDir = request.outputDir || process.cwd();
       this.monitorWorkflowStatus(
@@ -368,29 +368,37 @@ export class ApiClient {
             });
           }
         },
-        { 
+        {
           pollingInterval: 1000,
-          outputDir // Pass the output directory to the monitoring function
+          outputDir, // Pass the output directory to the monitoring function
         }
       );
 
       // Variable for the watch Stream reader
       let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
       let watchResponseObject: Response | undefined;
-      
+
       // Process the workflow watch responses if we have a watch request
       if (watchPromise) {
         try {
           // Set a timeout for the watch fetch
           const timeoutPromise = new Promise<Response>((_, reject) => {
-            setTimeout(() => reject(new Error('Watch request timed out')), 15000);
+            setTimeout(
+              () => reject(new Error("Watch request timed out")),
+              15000
+            );
           });
-          
+
           // Race the fetch against the timeout
-          watchResponseObject = await Promise.race([watchPromise, timeoutPromise]);
-          
+          watchResponseObject = await Promise.race([
+            watchPromise,
+            timeoutPromise,
+          ]);
+
           if (!watchResponseObject.ok) {
-            console.error(`Workflow watch failed with status: ${watchResponseObject.status}`);
+            console.error(
+              `Workflow watch failed with status: ${watchResponseObject.status}`
+            );
             // Continue with polling only - don't throw
           } else if (!watchResponseObject.body) {
             console.error("Watch response body is null");
@@ -404,7 +412,7 @@ export class ApiClient {
           // Continue with polling as fallback
         }
       }
-      
+
       const decoder = new TextDecoder();
       let buffer = "";
       let fullText = "";
@@ -516,7 +524,7 @@ export class ApiClient {
           while (true) {
             try {
               const { done, value } = await reader.read();
-              
+
               if (done) {
                 console.log("Workflow watch completed");
                 break;
@@ -625,7 +633,7 @@ export class ApiClient {
           // If we don't have a reader, just rely on polling
           console.log("Using polling-only mode for workflow updates");
           // Wait for polling to complete naturally
-          await new Promise(resolve => setTimeout(resolve, 10000));
+          await new Promise((resolve) => setTimeout(resolve, 10000));
         }
       } catch (streamError) {
         console.error("Error processing workflow stream:", streamError);
@@ -697,197 +705,540 @@ export class ApiClient {
     outputDir: string = process.cwd()
   ): Promise<void> {
     try {
-      console.log(`Extracting project files from ${workflowName} run ${runId} to ${outputDir}...`);
-      
+      console.log(
+        `Extracting project files from ${workflowName} run ${runId} to ${outputDir}...`
+      );
+
       // Fetch the workflow run data to get file information
-      console.log(`Fetching workflow data from: /api/workflows/${workflowName}/runs?runId=${runId}`);
+      console.log(
+        `Fetching workflow data from: /api/workflows/${workflowName}/runs?runId=${runId}`
+      );
       const response = await this.client.get<{
-        steps: Record<string, {
-          status: string;
-          output: any;
-        }>;
+        steps: Record<
+          string,
+          {
+            status: string;
+            output: any;
+          }
+        >;
       }>(`/api/workflows/${workflowName}/runs`, {
         params: { runId },
       });
-      
+
       // Check if we have a successful response with steps
       if (!response.data || !response.data.steps) {
-        console.log('No workflow steps found in response');
-        console.log('Response data:', JSON.stringify(response.data, null, 2));
-        
+        console.log("No workflow steps found in response");
+        console.log("Response data:", JSON.stringify(response.data, null, 2));
+
         // Try an alternative approach - check the output directory on the server
         await this.extractFromOutputDirectory(outputDir, runId);
         return;
       }
-      
-      console.log('Workflow steps found:', Object.keys(response.data.steps).join(', '));
-      
+
+      console.log(
+        "Workflow steps found:",
+        Object.keys(response.data.steps).join(", ")
+      );
+
       // Find the scaffold step that contains file information
       const scaffoldStep = Object.entries(response.data.steps).find(
-        ([stepId, step]) => stepId.includes('scaffold') && step.status === 'success'
+        ([stepId, step]) =>
+          stepId.includes("scaffold") && step.status === "success"
       );
-      
+
       if (!scaffoldStep) {
-        console.log('No successful scaffold step found, looking for any scaffold step...');
+        console.log(
+          "No successful scaffold step found, looking for any scaffold step..."
+        );
         // Try to find any scaffold step, even if not marked as success
         const anyScaffoldStep = Object.entries(response.data.steps).find(
-          ([stepId]) => stepId.includes('scaffold')
+          ([stepId]) => stepId.includes("scaffold")
         );
-        
+
         if (!anyScaffoldStep) {
-          console.log('No scaffold step found at all, trying alternate extraction methods...');
+          console.log(
+            "No scaffold step found at all, trying alternate extraction methods..."
+          );
           await this.extractFromOutputDirectory(outputDir, runId);
           return;
         }
-        
-        console.log(`Found scaffold step ${anyScaffoldStep[0]} with status: ${anyScaffoldStep[1].status}`);
-        
+
+        console.log(
+          `Found scaffold step ${anyScaffoldStep[0]} with status: ${anyScaffoldStep[1].status}`
+        );
+
         if (!anyScaffoldStep[1].output || !anyScaffoldStep[1].output.files) {
-          console.log('Scaffold step found but no files in output:', anyScaffoldStep[0]);
-          console.log('Step output:', JSON.stringify(anyScaffoldStep[1].output, null, 2));
+          console.log(
+            "Scaffold step found but no files in output:",
+            anyScaffoldStep[0]
+          );
+          console.log(
+            "Step output:",
+            JSON.stringify(anyScaffoldStep[1].output, null, 2)
+          );
           await this.extractFromOutputDirectory(outputDir, runId);
           return;
         }
-        
+
         const files: MastraFile[] = anyScaffoldStep[1].output.files;
         await this.writeFilesToDirectory(files, outputDir);
         return;
       }
-      
+
       console.log(`Found successful scaffold step: ${scaffoldStep[0]}`);
-      
+
       if (!scaffoldStep[1].output || !scaffoldStep[1].output.files) {
-        console.log('Successful scaffold step found but no files in output');
-        console.log('Step output:', JSON.stringify(scaffoldStep[1].output, null, 2));
+        console.log("Successful scaffold step found but no files in output");
+        console.log(
+          "Step output:",
+          JSON.stringify(scaffoldStep[1].output, null, 2)
+        );
         await this.extractFromOutputDirectory(outputDir, runId);
         return;
       }
-      
+
       const files: MastraFile[] = scaffoldStep[1].output.files;
       if (!files || files.length === 0) {
-        console.log('No files found in scaffold step output');
+        console.log("No files found in scaffold step output");
         await this.extractFromOutputDirectory(outputDir, runId);
         return;
       }
-      
+
       await this.writeFilesToDirectory(files, outputDir);
     } catch (error) {
-      console.error('Error extracting project files:', error);
+      console.error("Error extracting project files:", error);
       // Try the fallback method if the main method fails
       try {
         await this.extractFromOutputDirectory(outputDir);
       } catch (fallbackError) {
-        console.error('Fallback extraction also failed:', fallbackError);
+        console.error("Fallback extraction also failed:", fallbackError);
       }
     }
   }
-  
+
   /**
    * Fallback method to extract files from the .mastra/output directory
    * @param outputDir Directory to write the files to
    * @param runId Optional runId for file matching
    */
-  private async extractFromOutputDirectory(outputDir: string, runId?: string): Promise<void> {
+  private async extractFromOutputDirectory(
+    outputDir: string,
+    runId?: string,
+    useAlternativePaths: boolean = false
+  ): Promise<void> {
     try {
-      console.log('Attempting to extract files from backend output directory...');
-      
+      console.log(
+        "Attempting to extract files from backend output directory..."
+      );
+
       // Import required modules for file operations
-      const fs = await import('fs');
-      const path = await import('path');
-      
-      // Define paths to check
-      const potentialPaths = [
-        '/home/vishesh.baghel/Documents/workspace/hack-helper/backend/.mastra/output',
-        './backend/.mastra/output',
-        '../backend/.mastra/output',
-        './.mastra/output'
+      const fs = await import("fs");
+      const path = await import("path");
+
+      // Define paths to check - primary paths first, then alternative paths
+      const primaryPaths = [
+        "/home/vishesh.baghel/Documents/workspace/hack-helper/backend/.mastra/hack-helper",
+        "./backend/.mastra/hack-helper",
+        "../backend/.mastra/hack-helper",
+        "./.mastra/hack-helper",
       ];
-      
-      let outputPath = '';
+
+      // Additional paths to check if primary paths don't work or when useAlternativePaths is true
+      const alternativePaths = [
+        "/home/vishesh.baghel/Documents/workspace/hack-helper/backend/.mastra/output",
+        "./backend/.mastra/output",
+        "../backend/.mastra/output",
+        "./.mastra/output",
+        "/home/vishesh.baghel/Documents/workspace/hack-helper/backend/.mastra",
+        "./backend/.mastra",
+        "../backend/.mastra",
+        "./.mastra",
+        "/home/vishesh.baghel/Documents/workspace/hack-helper/backend",
+        "./backend",
+        "../backend",
+        ".",
+      ];
+
+      // Determine which paths to try
+      const potentialPaths = useAlternativePaths
+        ? [...alternativePaths, ...primaryPaths] // Try alternative paths first
+        : [...primaryPaths, ...alternativePaths]; // Try primary paths first
+
+      let outputPath = "";
+      let foundDirectory = false;
+
+      // Try to find a suitable output directory
       for (const testPath of potentialPaths) {
         if (fs.existsSync(testPath)) {
           outputPath = testPath;
-          console.log(`Found output directory: ${outputPath}`);
-          break;
+          console.log(`Found potential output directory: ${outputPath}`);
+
+          // Check if this directory contains project files or subdirectories
+          try {
+            const contents = fs.readdirSync(outputPath);
+            if (contents.length > 0) {
+              const hasDirectories = contents.some((item) =>
+                fs.statSync(path.join(outputPath, item)).isDirectory()
+              );
+
+              // If it has directories or specific project files, consider it a match
+              if (
+                hasDirectories ||
+                contents.some((file) =>
+                  ["package.json", "tsconfig.json", "README.md"].includes(file)
+                )
+              ) {
+                console.log(
+                  `Found output directory with valid content: ${outputPath}`
+                );
+                foundDirectory = true;
+                break;
+              }
+            }
+          } catch (readError) {
+            console.log(`Could not read directory ${testPath}:`, readError);
+          }
         }
       }
-      
-      if (!outputPath) {
-        console.log('Could not find the .mastra/output directory');
+
+      if (!foundDirectory) {
+        console.log(
+          "Could not find any suitable output directory with project files"
+        );
         return;
       }
-      
-      // Look for the most recent directory in the output folder
-      let directories = fs.readdirSync(outputPath)
-        .filter(file => fs.statSync(path.join(outputPath, file)).isDirectory());
-      
+
+      // Look for the most recent directories in the output folder
+      let directories: string[] = [];
+      try {
+        directories = fs.readdirSync(outputPath).filter((file) => {
+          try {
+            return fs.statSync(path.join(outputPath, file)).isDirectory();
+          } catch (statError) {
+            return false;
+          }
+        });
+      } catch (readError) {
+        console.error(
+          `Error reading output directory ${outputPath}:`,
+          readError
+        );
+      }
+
       // If runId is provided, try to find a matching directory
       if (runId) {
-        const matchingDirs = directories.filter(dir => dir.includes(runId));
+        const matchingDirs = directories.filter((dir) => dir.includes(runId));
         if (matchingDirs.length > 0) {
           directories = matchingDirs;
         }
       }
-      
+
       // Sort by modification time (newest first)
-      directories.sort((a, b) => {
-        return fs.statSync(path.join(outputPath, b)).mtime.getTime() -
-               fs.statSync(path.join(outputPath, a)).mtime.getTime();
-      });
-      
+      try {
+        directories.sort((a, b) => {
+          try {
+            return (
+              fs.statSync(path.join(outputPath, b)).mtime.getTime() -
+              fs.statSync(path.join(outputPath, a)).mtime.getTime()
+            );
+          } catch (statError) {
+            return 0; // Keep original order if we can't stat
+          }
+        });
+      } catch (sortError) {
+        console.error("Error sorting directories:", sortError);
+      }
+
       if (directories.length === 0) {
-        console.log('No project directories found in the output folder');
+        console.log("No project directories found in the output folder");
+
+        // If we're here but outputPath exists, see if we can copy files directly from it
+        // This handles the case where files might be directly in the output path
+        try {
+          const files = fs
+            .readdirSync(outputPath)
+            .filter(
+              (file) => !fs.statSync(path.join(outputPath, file)).isDirectory()
+            );
+
+          if (files.length > 0) {
+            console.log(
+              `Found ${files.length} files directly in ${outputPath}, copying them`
+            );
+            this.copyFilesRecursively(outputPath, outputDir, fs, path);
+            return;
+          }
+        } catch (readError) {
+          console.error("Error checking for direct files:", readError);
+        }
+
         return;
       }
-      
-      const latestDir = path.join(outputPath, directories[0]);
-      console.log(`Using most recent project directory: ${latestDir}`);
-      
-      // Copy all files from the source to the destination
-      this.copyFilesRecursively(latestDir, outputDir, fs, path);
+
+      // First, look for a directory with key project files (package.json, tsconfig.json, etc.)
+      for (const dir of directories) {
+        const sourceDir = path.join(outputPath, dir);
+        console.log(`Checking for complete project in directory: ${sourceDir}`);
+
+        try {
+          // Check if this looks like a proper project root (has package.json or tsconfig.json)
+          const contents = fs.readdirSync(sourceDir);
+          if (
+            contents.some((file) =>
+              ["package.json", "tsconfig.json", "README.md"].includes(file)
+            )
+          ) {
+            console.log(`Found likely project root: ${sourceDir}`);
+
+            // This looks like a proper project directory - copy all files from here
+            this.copyFilesRecursively(sourceDir, outputDir, fs, path);
+
+            // Check if we successfully copied any files
+            if (
+              fs.existsSync(outputDir) &&
+              fs.readdirSync(outputDir).length > 0
+            ) {
+              console.log(
+                `Successfully copied complete project from ${sourceDir}`
+              );
+              return; // Success - exit the method
+            }
+          }
+        } catch (readError) {
+          console.error(`Error reading directory ${sourceDir}:`, readError);
+        }
+      }
+
+      console.log(
+        "No complete project directory found, checking for project in parent"
+      );
+
+      // If we get here, check if 'undefined-project' is a special marker - the parent dir may be the actual project
+      if (directories.includes("undefined-project")) {
+        console.log(
+          "Found undefined-project marker, checking parent directory"
+        );
+        try {
+          // The parent directory may have the scaffolded project
+          const contents = fs.readdirSync(outputPath);
+
+          // Check if output path has project files or expected directories
+          if (
+            contents.some((file) =>
+              ["package.json", "tsconfig.json", "README.md"].includes(file)
+            ) ||
+            contents.some((file) =>
+              ["src", "dist", "tests", "config"].includes(file)
+            )
+          ) {
+            console.log(
+              `Found project structure in parent directory: ${outputPath}`
+            );
+            this.copyFilesRecursively(outputPath, outputDir, fs, path);
+
+            if (
+              fs.existsSync(outputDir) &&
+              fs.readdirSync(outputDir).length > 0
+            ) {
+              console.log(
+                `Successfully copied project from parent dir ${outputPath}`
+              );
+              return;
+            }
+          }
+        } catch (parentError) {
+          console.error(`Error checking parent directory:`, parentError);
+        }
+      }
+
+      // If still no luck, try combining files from multiple directories
+      console.log("Attempting to collect files from multiple directories");
+      let filesCopied = 0;
+
+      // Try to copy src directory (if it exists)
+      if (
+        directories.includes("src") ||
+        directories.some((d) => d.includes("src"))
+      ) {
+        const srcDir = directories.includes("src")
+          ? path.join(outputPath, "src")
+          : path.join(
+              outputPath,
+              directories.find((d) => d.includes("src")) || ""
+            );
+
+        try {
+          if (fs.existsSync(srcDir) && fs.statSync(srcDir).isDirectory()) {
+            console.log(`Copying files from src directory: ${srcDir}`);
+            const targetSrcDir = path.join(outputDir, "src");
+            if (!fs.existsSync(targetSrcDir)) {
+              fs.mkdirSync(targetSrcDir, { recursive: true });
+            }
+            this.copyFilesRecursively(srcDir, targetSrcDir, fs, path);
+            filesCopied++;
+          }
+        } catch (srcError) {
+          console.error(`Error copying src directory:`, srcError);
+        }
+      }
+
+      // Try each directory and see if it contains useful files
+      for (const dir of directories) {
+        // Skip 'src' as we already handled it
+        if (dir === "src" || dir.includes("src")) continue;
+
+        const sourceDir = path.join(outputPath, dir);
+        console.log(`Checking directory for useful files: ${sourceDir}`);
+
+        try {
+          const contents = fs.readdirSync(sourceDir);
+
+          // Look for specific file patterns that should be copied
+          const hasUsefulFiles = contents.some(
+            (file) =>
+              file.endsWith(".json") ||
+              file.endsWith(".md") ||
+              file.endsWith(".ts") ||
+              file.endsWith(".js") ||
+              file.endsWith(".html") ||
+              file.endsWith(".css")
+          );
+
+          if (hasUsefulFiles) {
+            console.log(`Found useful files in: ${sourceDir}`);
+            // Copy based on the directory name to maintain structure
+            const targetDir = path.join(outputDir, dir);
+            if (!fs.existsSync(targetDir)) {
+              fs.mkdirSync(targetDir, { recursive: true });
+            }
+            this.copyFilesRecursively(sourceDir, targetDir, fs, path);
+            filesCopied++;
+          }
+        } catch (dirError) {
+          console.error(`Error processing directory ${dir}:`, dirError);
+        }
+      }
+
+      // If we've copied at least some files, consider it a partial success
+      if (filesCopied > 0) {
+        console.log(`Copied files from ${filesCopied} directories`);
+        return;
+      }
+
+      // If we get here, we tried all directories but none worked
+      console.log("None of the project directories contained viable files");
     } catch (error) {
-      console.error('Error in fallback extraction:', error);
+      console.error("Error in fallback extraction:", error);
     }
   }
-  
+
   /**
    * Copy files recursively from one directory to another
    */
   private copyFilesRecursively(
-    sourceDir: string, 
-    targetDir: string, 
-    fs: typeof import('fs'), 
-    path: typeof import('path')
+    sourceDir: string,
+    targetDir: string,
+    fs: typeof import("fs"),
+    path: typeof import("path")
   ): void {
     // Create the target directory if it doesn't exist
     if (!fs.existsSync(targetDir)) {
       fs.mkdirSync(targetDir, { recursive: true });
     }
-    
+
+    // Directories to explicitly exclude from copying
+    const excludedDirs = [
+      "playground",
+      "assets",
+      "node_modules",
+      "output",
+      ".git",
+      ".mastra",
+    ];
+
+    // Filter for relevant file extensions (only copy useful project files)
+    const relevantExtensions = [
+      ".ts",
+      ".js",
+      ".tsx",
+      ".jsx",
+      ".json",
+      ".md",
+      ".html",
+      ".css",
+      ".scss",
+      ".yaml",
+      ".yml",
+      ".svg",
+      ".png",
+      ".ico",
+      ".gitignore",
+      ".env",
+      ".env.example",
+      ".npmrc",
+      ".eslintrc",
+      ".prettierrc",
+    ];
+
+    // Check if this is a directory we should skip
+    const dirName = path.basename(sourceDir);
+    if (excludedDirs.includes(dirName)) {
+      console.log(`Skipping excluded directory: ${dirName}`);
+      return;
+    }
+
     // Read all items in the source directory
     const items = fs.readdirSync(sourceDir);
-    
+
     let fileCount = 0;
     for (const item of items) {
+      // Skip hidden files and directories (start with .)
+      if (item.startsWith(".") && item !== ".gitignore") {
+        continue;
+      }
+
       const sourcePath = path.join(sourceDir, item);
       const targetPath = path.join(targetDir, item);
-      
-      const stats = fs.statSync(sourcePath);
-      
-      if (stats.isDirectory()) {
-        // Recursively copy directories
-        this.copyFilesRecursively(sourcePath, targetPath, fs, path);
-      } else {
-        // Copy files
-        fs.copyFileSync(sourcePath, targetPath);
-        fileCount++;
-        console.log(`Copied file: ${targetPath}`);
+
+      try {
+        const stats = fs.statSync(sourcePath);
+
+        if (stats.isDirectory()) {
+          // Skip excluded directories
+          if (excludedDirs.includes(item)) {
+            console.log(`Skipping excluded directory: ${item}`);
+            continue;
+          }
+
+          // Recursively copy directories
+          this.copyFilesRecursively(sourcePath, targetPath, fs, path);
+        } else {
+          // Only copy files with relevant extensions
+          const ext = path.extname(item).toLowerCase();
+          const isRelevantFile =
+            relevantExtensions.includes(ext) ||
+            relevantExtensions.some((e) => item.endsWith(e)) ||
+            item === "package.json" ||
+            item === "tsconfig.json" ||
+            item === "README.md";
+
+          if (isRelevantFile) {
+            // Copy files
+            fs.copyFileSync(sourcePath, targetPath);
+            fileCount++;
+            console.log(`Copied file: ${targetPath}`);
+          } else {
+            console.log(`Skipping irrelevant file: ${item}`);
+          }
+        }
+      } catch (error) {
+        console.error(`Error processing ${sourcePath}:`, error);
       }
     }
-    
+
     console.log(`Copied ${fileCount} files from ${sourceDir} to ${targetDir}`);
   }
-  
+
   /**
    * Write Mastra files to the specified directory
    */
@@ -899,89 +1250,140 @@ export class ApiClient {
    */
   public async ensureProjectFilesExtracted(outputDir: string): Promise<void> {
     try {
-      console.log('Manual extraction of project files requested...');
-      
-      // First try to extract from any recent workflow runs
-      const response = await this.client.get<{
-        runs: Array<{
-          id: string;
-          status: string;
-          startTime: string;
-        }>;
-      }>('/api/workflows/projectGenerationWorkflow/runs/list');
-      
-      if (response.data && response.data.runs && response.data.runs.length > 0) {
-        // Sort runs by start time (most recent first)
-        const runs = response.data.runs.sort((a, b) => {
-          return new Date(b.startTime).getTime() - new Date(a.startTime).getTime();
-        });
-        
-        console.log(`Found ${runs.length} workflow runs, trying most recent ones...`);
-        
-        // Try the three most recent runs
-        const recentRuns = runs.slice(0, 3);
-        
-        for (const run of recentRuns) {
-          console.log(`Attempting extraction from run ${run.id} (${run.status})...`);
-          await this.extractProjectFiles('projectGenerationWorkflow', run.id, outputDir);
-          
-          // Check if files were extracted successfully
-          const fs = await import('fs');
-          if (fs.existsSync(outputDir) && fs.readdirSync(outputDir).length > 0) {
-            console.log(`Successfully extracted files from run ${run.id}`);
-            return;
+      console.log("Manual extraction of project files requested...");
+
+      // First directly try the fallback method as it's more likely to work
+      await this.extractFromOutputDirectory(outputDir);
+
+      // Check if we already have files
+      const fs = await import("fs");
+      if (fs.existsSync(outputDir) && fs.readdirSync(outputDir).length > 0) {
+        console.log("Successfully extracted files using fallback method");
+        return;
+      }
+
+      // As a secondary approach, try the API if direct extraction failed
+      try {
+        console.log("Checking for workflow runs in API...");
+        // Only proceed if the API endpoint exists
+        const runExists = await this.client.get("/health").catch(() => null);
+
+        if (runExists) {
+          // Try to get list of runs if the API is available
+          const response = await this.client.get<{
+            runs: Array<{
+              id: string;
+              status: string;
+              startTime: string;
+            }>;
+          }>("/api/workflows/projectGenerationWorkflow/runs/list");
+
+          if (
+            response.data &&
+            response.data.runs &&
+            response.data.runs.length > 0
+          ) {
+            // Sort runs by start time (most recent first)
+            const runs = response.data.runs.sort((a, b) => {
+              return (
+                new Date(b.startTime).getTime() -
+                new Date(a.startTime).getTime()
+              );
+            });
+
+            console.log(
+              `Found ${runs.length} workflow runs, trying most recent ones...`
+            );
+
+            // Try the most recent run
+            const recentRun = runs[0];
+            console.log(
+              `Attempting extraction from run ${recentRun.id} (${recentRun.status})...`
+            );
+            await this.extractProjectFiles(
+              "projectGenerationWorkflow",
+              recentRun.id,
+              outputDir
+            );
+
+            // Check again if files were extracted successfully
+            if (
+              fs.existsSync(outputDir) &&
+              fs.readdirSync(outputDir).length > 0
+            ) {
+              console.log(
+                `Successfully extracted files from run ${recentRun.id}`
+              );
+              return;
+            }
           }
         }
+      } catch (apiError) {
+        console.log("API approach failed, continuing with local extraction");
+        // Just continue - we already tried the fallback method
       }
-      
-      // If no successful extraction from workflow runs, try the fallback method
-      await this.extractFromOutputDirectory(outputDir);
+
+      // If we're here, we've tried everything and still don't have files
+      // Try one more time with a different fallback path pattern
+      try {
+        console.log("Trying alternative output paths...");
+        await this.extractFromOutputDirectory(outputDir, undefined, true);
+      } catch (fallbackError) {
+        console.error("Final fallback extraction also failed");
+      }
     } catch (error) {
-      console.error('Error in ensureProjectFilesExtracted:', error);
-      // Try one more fallback approach
-      await this.extractFromOutputDirectory(outputDir);
+      console.error("Error in ensureProjectFilesExtracted:", error);
+      // We should never get here, but just to be safe
+      try {
+        await this.extractFromOutputDirectory(outputDir);
+      } catch (finalError) {
+        console.error("All extraction methods failed");
+      }
     }
   }
-  
-  private async writeFilesToDirectory(files: MastraFile[], outputDir: string): Promise<void> {
+
+  private async writeFilesToDirectory(
+    files: MastraFile[],
+    outputDir: string
+  ): Promise<void> {
     console.log(`Writing ${files.length} files to ${outputDir}`);
-    
+
     // Import required modules for file operations
-    const fs = await import('fs');
-    const path = await import('path');
-    
+    const fs = await import("fs");
+    const path = await import("path");
+
     // Ensure output directory exists
     if (!fs.existsSync(outputDir)) {
       fs.mkdirSync(outputDir, { recursive: true });
     }
-    
+
     // Write each file to the output directory
     let fileCount = 0;
     for (const file of files) {
       try {
         if (!file.path) {
-          console.log('Skipping file with no path');
+          console.log("Skipping file with no path");
           continue;
         }
-        
+
         // Create full path to the file
         const filePath = path.join(outputDir, file.path);
-        
+
         // Create directory if it doesn't exist
         const dirPath = path.dirname(filePath);
         if (!fs.existsSync(dirPath)) {
           fs.mkdirSync(dirPath, { recursive: true });
         }
-        
+
         // Write file content
-        fs.writeFileSync(filePath, file.content || '');
+        fs.writeFileSync(filePath, file.content || "");
         fileCount++;
         console.log(`Wrote file: ${filePath}`);
       } catch (fileError) {
         console.error(`Error writing file ${file.path}:`, fileError);
       }
     }
-    
+
     console.log(`Successfully extracted ${fileCount} files to ${outputDir}`);
   }
 
@@ -1023,7 +1425,13 @@ export class ApiClient {
       }
 
       try {
-        console.log(`Polling workflow status for ${workflowName}:${runId}...`);
+        // Don't log polling after first poll to reduce console noise
+        if (consecutiveErrors === 0) {
+          console.log(
+            `Polling workflow status for ${workflowName}:${runId}...`
+          );
+        }
+
         const response = await this.client.get<{
           status: string;
           results: Record<string, any>;
@@ -1040,10 +1448,13 @@ export class ApiClient {
           params: { runId },
         });
 
-        console.log(
-          `Received response:`,
-          JSON.stringify(response.data, null, 2)
-        );
+        // Only log detailed responses for debugging
+        if (process.env.DEBUG) {
+          console.log(
+            `Received response:`,
+            JSON.stringify(response.data, null, 2)
+          );
+        }
 
         if (response.data) {
           // Reset error counter on successful response
@@ -1057,8 +1468,11 @@ export class ApiClient {
             Object.entries(workflowData.activePaths || {})
           );
 
-          // Call the update callback with the status data
-          console.log(`Calling onUpdate with status: ${workflowData.status}`);
+          // Only log status changes to avoid noise
+          if (process.env.DEBUG) {
+            console.log(`Calling onUpdate with status: ${workflowData.status}`);
+          }
+
           onUpdate({
             runId,
             status: workflowData.status,
@@ -1066,15 +1480,21 @@ export class ApiClient {
             activePaths,
             timestamp: workflowData.timestamp || Date.now(),
           });
-          
+
           // If workflow is complete or has a scaffold step that completed,
           // check for and extract project files
-          const isWorkflowComplete = ["completed", "success"].includes(workflowData.status);
-          const hasScaffoldCompleted = Array.from(activePaths.entries())
-            .some(([stepId, step]) => 
-              stepId.includes("scaffold") && step.status === "success");
-            
-          if ((isWorkflowComplete || hasScaffoldCompleted) && !hasExtractedFiles) {
+          const isWorkflowComplete = ["completed", "success"].includes(
+            workflowData.status
+          );
+          const hasScaffoldCompleted = Array.from(activePaths.entries()).some(
+            ([stepId, step]) =>
+              stepId.includes("scaffold") && step.status === "success"
+          );
+
+          if (
+            (isWorkflowComplete || hasScaffoldCompleted) &&
+            !hasExtractedFiles
+          ) {
             // Attempt to extract project files
             await this.extractProjectFiles(workflowName, runId, outputDir);
             hasExtractedFiles = true;
@@ -1097,16 +1517,51 @@ export class ApiClient {
         }
       } catch (error) {
         consecutiveErrors++;
-        console.error(
-          `Error polling workflow status (attempt ${consecutiveErrors}):`,
-          error
-        );
+
+        // Check if the error is related to a closed connection (expected when workflow completes)
+        const axiosError = error as any; // Type assertion for error handling
+        const isConnectionClosed =
+          axios.isAxiosError(error) &&
+          (axiosError.code === "ECONNRESET" ||
+            axiosError.code === "ECONNREFUSED" ||
+            axiosError.code === "ECONNABORTED");
+
+        if (isConnectionClosed) {
+          // Server has probably completed the workflow and shut down the connection
+          // This is expected behavior - attempt to extract files one final time
+          if (!hasExtractedFiles) {
+            try {
+              console.log(
+                "Connection closed, extracting files from completed workflow..."
+              );
+              await this.extractProjectFiles(workflowName, runId, outputDir);
+              hasExtractedFiles = true;
+            } catch (extractError) {
+              // If extraction fails, try the fallback method
+              await this.extractFromOutputDirectory(outputDir, runId);
+            }
+          }
+          isMonitoring = false;
+          return;
+        } else if (consecutiveErrors <= 1) {
+          // Only log the first error to reduce noise
+          console.log(
+            `Connection issue with workflow server (${
+              axiosError.message || "Unknown error"
+            }). Using local file extraction.`
+          );
+        }
 
         // Stop monitoring after reaching max retries
         if (consecutiveErrors >= maxRetries) {
-          console.error(
-            `Stopping workflow monitoring after ${maxRetries} consecutive failures`
-          );
+          if (!hasExtractedFiles) {
+            try {
+              // Last attempt to extract files using directory method
+              await this.extractFromOutputDirectory(outputDir, runId);
+            } catch (finalError) {
+              // Ignore, we tried our best
+            }
+          }
           isMonitoring = false;
           return;
         }
