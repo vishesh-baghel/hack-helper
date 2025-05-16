@@ -112,6 +112,15 @@ program
     }
     await checkApiKey();
     await checkServerAvailability();
+    
+    // Create the project directory immediately
+    const projectPath = path.join(options.output, options.name);
+    if (!fs.existsSync(projectPath)) {
+      console.log(chalk.blue(`Creating directory: ${chalk.bold(projectPath)}`));
+      fs.mkdirSync(projectPath, { recursive: true });
+    } else {
+      console.log(chalk.yellow(`Directory already exists: ${chalk.bold(projectPath)}`));
+    }
 
     console.log(
       chalk.green("🚀 Initializing project from idea:"),
@@ -196,22 +205,34 @@ program
         }
       }, spinner.interval);
 
-      // Use the project name as the directory in the current location
-      const projectPath = path.join(options.output, options.name);
-
+      // Project path is defined above where we created the directory
       console.log(
-        chalk.blue(`\nCreating project: ${chalk.bold(options.name)}\n`)
+        chalk.blue(`\nCreating project: ${chalk.bold(options.name)} in ${chalk.bold(projectPath)}\n`)
       );
 
-      // Run the streaming process
+      // Run the streaming process and ensure files are written to our created directory
       const result = await client.streamInitializeProject(
         {
           idea,
           projectName: options.name,
-          outputDir: projectPath,
+          outputDir: projectPath, // This ensures the project is written to the correct location
         },
         onProgress
       );
+      
+      // After the workflow completes, double check that files are in the directory
+      if (result.success && fs.readdirSync(projectPath).length === 0) {
+        console.log(chalk.yellow('\nNo files found in project directory, attempting recovery...'));
+        
+        // Manually trigger the API client's file extraction
+        await client.ensureProjectFilesExtracted(projectPath);
+        
+        if (fs.readdirSync(projectPath).length > 0) {
+          console.log(chalk.green('Files successfully recovered!'));
+        } else {
+          console.log(chalk.red('Could not recover files. Please try again or check the server logs.'));
+        }
+      }
 
       // Stop spinner animation
       isCompleted = true;
