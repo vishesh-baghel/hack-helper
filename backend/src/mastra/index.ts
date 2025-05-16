@@ -3,17 +3,6 @@ import { createLogger } from "@mastra/core/logger";
 import { LibSQLStore } from "@mastra/libsql";
 import { orchestratorAgent } from "./agents/orchestrator.agent";
 
-// import {
-//   orchestratorAgent,
-//   briefExtractorAgent,
-//   briefParserAgent,
-//   plannerAgent,
-//   scaffolderAgent,
-//   featureEnhancerAgent,
-//   boardPublisherAgent,
-//   deployerAgent
-// } from './consolidated-agents';
-
 import { briefExtractorAgent } from "./agents/brief-extractor.agent";
 import { briefParserAgent } from "./agents/brief-parser.agent";
 import { plannerAgent } from "./agents/planner.agent";

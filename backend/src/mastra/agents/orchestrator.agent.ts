@@ -42,7 +42,7 @@ export const orchestratorAgent = new Agent({
     }),
     options: {
       lastMessages: 10,
-      semanticRecall: true,
+      semanticRecall: false,
       threads: {
         generateTitle: true,
       },
