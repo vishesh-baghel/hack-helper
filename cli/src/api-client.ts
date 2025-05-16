@@ -63,22 +63,28 @@ export class ApiClient {
     request: ProjectInitRequest
   ): Promise<ApiResponse<AgentResponse>> {
     try {
+      // Using standard Mastra workflow API endpoints
+      // First, we start the projectGenerationWorkflow
       const response = await this.client.post(
-        "/api/agents/orchestratorAgent/generate",
+        "/api/workflows/projectGenerationWorkflow/start-async",
         {
-          messages: [
-            { role: "user", content: `Initialize project: ${request.idea}` },
-          ],
-          outputDir: request.outputDir,
+          input: {
+            projectIdea: request.idea,
+            projectName: request.projectName || request.idea.toLowerCase()
+              .replace(/[^a-z0-9\s-]/g, '')
+              .replace(/\s+/g, '-')
+              .replace(/-+/g, '-')
+              .substring(0, 30)
+          }
         }
       );
 
-      // Map the Mastra API response to our expected format
-      const mastraResponse = response.data;
+      // Get the workflow execution details and any generated content
+      const workflowResponse = response.data;
 
-      // Extract files if they exist
-      const generatedFiles = mastraResponse.files
-        ? mastraResponse.files.map((file: MastraFile) => ({
+      // Map files from the response or use an empty array if none exist
+      const generatedFiles = workflowResponse.files 
+        ? workflowResponse.files.map((file: MastraFile) => ({
             path: file.path,
             content: file.content || "",
           }))
@@ -90,7 +96,10 @@ export class ApiClient {
           role: "user" as const,
           content: `Initialize project: ${request.idea}`,
         },
-        { role: "assistant" as const, content: mastraResponse.text || "" },
+        { 
+          role: "assistant" as const, 
+          content: workflowResponse.text || workflowResponse.output?.scaffoldResult || "Project initialization completed" 
+        },
       ];
 
       return {
@@ -124,6 +133,8 @@ export class ApiClient {
     request: FeatureRequest
   ): Promise<ApiResponse<AgentResponse>> {
     try {
+      // If you have a feature-enhancement workflow, use it here
+      // For now, we're using the direct agent endpoint as before
       const response = await this.client.post(
         "/api/agents/featureEnhancerAgent/generate",
         {
@@ -248,170 +259,253 @@ export class ApiClient {
     onProgress: (text: string, files?: Array<{path: string; content: string}>) => void
   ): Promise<ApiResponse<AgentResponse>> {
     try {
-      // Connect to the streaming endpoint
-      const response = await fetch(`${this.client.defaults.baseURL}/api/agents/orchestratorAgent/stream`, {
+      // Create a workflow run first
+      console.log("Creating workflow run...");
+      const createRunResponse = await fetch(`${this.client.defaults.baseURL}/api/workflows/projectGenerationWorkflow/createRun`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(this.apiKey ? { Authorization: `Bearer ${this.apiKey}` } : {}),
+        }
+      });
+      
+      if (!createRunResponse.ok) {
+        const errorText = await createRunResponse.text();
+        console.error("Error response:", errorText);
+        throw new Error(`Failed to create workflow run: ${createRunResponse.status}. Details: ${errorText}`);
+      }
+      
+      const createRunData = await createRunResponse.json();
+      console.log("Create run response:", JSON.stringify(createRunData));
+      
+      const runId = createRunData.runId;
+      if (!runId) {
+        throw new Error('No runId returned from createRun endpoint');
+      }
+      
+      console.log(`Created run with ID: ${runId}`);
+      
+      // Start watching the workflow for real-time updates
+      const watchUrl = `${this.client.defaults.baseURL}/api/workflows/projectGenerationWorkflow/watch?runId=${runId}`;
+      console.log(`Watching workflow at: ${watchUrl}`);
+      const watchResponse = fetch(watchUrl, {
+        method: 'GET', // Explicitly set GET method for watch endpoint
+        headers: {
+          'Accept': 'text/event-stream', // Add proper headers for SSE
+          ...(this.apiKey ? { Authorization: `Bearer ${this.apiKey}` } : {}),
+        },
+      });
+      
+      // Start the workflow with our input data
+      console.log(`Starting workflow with runId: ${runId}...`);
+      const startUrl = `${this.client.defaults.baseURL}/api/workflows/projectGenerationWorkflow/start-async`;
+      console.log(`Starting workflow at: ${startUrl}`);
+      
+      const response = await fetch(startUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           ...(this.apiKey ? { Authorization: `Bearer ${this.apiKey}` } : {}),
         },
         body: JSON.stringify({
-          messages: [
-            { role: "user", content: `Initialize project: ${request.idea} with name: ${request.projectName}` },
-          ],
-          projectName: request.projectName,
-          outputDir: request.outputDir,
+          runId,
+          inputData: {
+            projectIdea: request.idea,
+            projectName: request.projectName
+          }
         }),
       });
       
       if (!response.ok) {
-        throw new Error(`Stream request failed with status: ${response.status}`);
-      }
-
-      if (!response.body) {
-        throw new Error('Response body is null');
+        const errorText = await response.text();
+        console.error("Workflow start error response:", errorText);
+        throw new Error(`Workflow start failed with status: ${response.status}. Details: ${errorText}`);
       }
       
-      // Process the stream
-      const reader = response.body.getReader();
+      console.log("Workflow started successfully");
+      
+      // Process the workflow watch responses
+      const watchResponseObject = await watchResponse;
+      if (!watchResponseObject.ok) {
+        throw new Error(`Workflow watch failed with status: ${watchResponseObject.status}`);
+      }
+      
+      if (!watchResponseObject.body) {
+        throw new Error('Watch response body is null');
+      }
+      
+      // Process the watch stream
+      const reader = watchResponseObject.body.getReader();
       const decoder = new TextDecoder();
       let buffer = '';
       let fullText = '';
       let generatedFiles: Array<{path: string; content: string}> = [];
+      let currentStep = ''; // Track the current step in the workflow
+      let workflowComplete = false;
       
-      // Initial stream setup - silence this in production
-      
-      // Track what we're receiving for debugging
-      let lineCount = 0;
-      let textFragments: string[] = [];
-      let messageId = '';
-      let waitingForFiles = true;
-      
-      // Function to periodically check for files in the output directory
-      const checkForFiles = async () => {
+      // Function to fetch workflow step outputs
+      const fetchStepOutput = async (stepId: string): Promise<string> => {
         try {
-          // Make a request to check if files have been generated
-          const checkResponse = await fetch(`${this.client.defaults.baseURL}/api/agents/orchestratorAgent/generate`, {
-            method: 'POST',
+          const stepResponse = await fetch(`${this.client.defaults.baseURL}/api/workflows/projectGenerationWorkflow/runs?runId=${runId}`, {
             headers: {
-              'Content-Type': 'application/json',
               ...(this.apiKey ? { Authorization: `Bearer ${this.apiKey}` } : {}),
             },
-            body: JSON.stringify({
-              messages: [
-                { role: "user", content: `Check files for project: ${request.projectName}` },
-              ],
-              projectName: request.projectName,
-              outputDir: request.outputDir,
-            }),
           });
           
-          if (checkResponse.ok) {
-            const checkData = await checkResponse.json();
-            if (checkData.files && checkData.files.length > 0) {
-              console.log(`Found ${checkData.files.length} files in check request!`);
-              generatedFiles = checkData.files.map((file: MastraFile) => ({
+          if (stepResponse.ok) {
+            const runData = await stepResponse.json();
+            
+            // Look for the step output in the run data
+            if (runData.steps && runData.steps[stepId] && runData.steps[stepId].output) {
+              const stepOutput = runData.steps[stepId].output;
+              // Different steps have different output formats
+              if (stepId === 'extractBrief') return stepOutput.extractedBrief || '';
+              if (stepId === 'parseBrief') return JSON.stringify(stepOutput.parsedBrief, null, 2) || '';
+              if (stepId === 'createPlan') return stepOutput.projectPlan || '';
+              if (stepId === 'scaffoldProject') return stepOutput.scaffoldResult || '';
+              
+              // Default: stringify any output
+              return typeof stepOutput === 'string' ? stepOutput : JSON.stringify(stepOutput, null, 2);
+            }
+          }
+        } catch (e) {
+          console.error(`Error fetching output for step ${stepId}:`, e);
+        }
+        return '';
+      };
+      
+      // Function to check for generated files
+      const checkForFiles = async (): Promise<boolean> => {
+        try {
+          // When workflow is completed, check for files in the scaffoldProject step output
+          const fileCheckResponse = await fetch(`${this.client.defaults.baseURL}/api/workflows/projectGenerationWorkflow/runs?runId=${runId}`, {
+            headers: {
+              ...(this.apiKey ? { Authorization: `Bearer ${this.apiKey}` } : {}),
+            },
+          });
+          
+          if (fileCheckResponse.ok) {
+            const runData = await fileCheckResponse.json();
+            // Check if the scaffoldProject step has files in its output
+            if (runData.steps && 
+                runData.steps.scaffoldProject && 
+                runData.steps.scaffoldProject.output && 
+                runData.steps.scaffoldProject.output.files) {
+              
+              const files = runData.steps.scaffoldProject.output.files;
+              generatedFiles = files.map((file: MastraFile) => ({
                 path: file.path,
                 content: file.content || '',
               }));
-              onProgress(fullText, generatedFiles);
-              return true; // Files found
+              
+              return generatedFiles.length > 0;
             }
           }
         } catch (e) {
           console.error('Error checking for files:', e);
         }
-        return false; // No files found yet
+        return false;
       };
       
-      // Start periodic file checking
-      const checkInterval = 5000; // Check every 5 seconds
-      const fileCheckTimer = setInterval(async () => {
-        if (waitingForFiles) {
-          const filesFound = await checkForFiles();
-          if (filesFound) {
-            clearInterval(fileCheckTimer);
-            waitingForFiles = false;
+      // Set up interval to periodically check for files
+      const fileCheckInterval = setInterval(async () => {
+        if (workflowComplete) {
+          const hasFiles = await checkForFiles();
+          if (hasFiles) {
+            onProgress(fullText, generatedFiles);
+            clearInterval(fileCheckInterval);
           }
         }
-      }, checkInterval);
+      }, 5000);
       
       try {
+        // Process workflow events
         while (true) {
           const { done, value } = await reader.read();
+          
           if (done) {
-            console.log('Stream completed');
+            console.log('Workflow watch completed');
             break;
           }
           
-          // Decode the chunk and add to buffer
-          buffer += decoder.decode(value, { stream: true });
+          // Decode and process the chunk
+          const chunk = decoder.decode(value, { stream: true });
+          buffer += chunk;
           
-          // Process each line in the buffer
-          let lineEnd;
-          while ((lineEnd = buffer.indexOf('\n')) >= 0) {
-            const line = buffer.slice(0, lineEnd).trim();
-            buffer = buffer.slice(lineEnd + 1);
-            lineCount++;
+          // Process each event in the buffer (separated by double newlines)
+          let eventEnd;
+          while ((eventEnd = buffer.indexOf('\n\n')) >= 0) {
+            const eventData = buffer.slice(0, eventEnd).trim();
+            buffer = buffer.slice(eventEnd + 2);
             
-            // Process message ID (format: f:{"messageId":"msg-xxx"})
-            if (line.startsWith('f:') && line.includes('messageId')) {
+            // Parse the event data
+            if (eventData.startsWith('data: ')) {
               try {
-                const jsonData = JSON.parse(line.slice(2));
-                messageId = jsonData.messageId;
-                // Message ID received (keep this silent in production)
+                const jsonData = JSON.parse(eventData.slice(6));
+                
+                // Handle different event types
+                if (jsonData.type === 'step') {
+                  // A workflow step has updated its status
+                  const stepId = jsonData.stepId;
+                  const status = jsonData.status;
+                  
+                  if (status === 'running') {
+                    // Step started running
+                    currentStep = stepId;
+                    const stepText = `Running step: ${stepId}...\n`;
+                    fullText += stepText;
+                    onProgress(fullText, generatedFiles);
+                  } 
+                  else if (status === 'success') {
+                    // Step completed successfully
+                    const stepOutput = await fetchStepOutput(stepId);
+                    const stepCompletedText = `Completed step: ${stepId}\n\n`;
+                    fullText += stepCompletedText;
+                    
+                    if (stepOutput) {
+                      fullText += `${stepOutput}\n\n`;
+                      onProgress(fullText, generatedFiles);
+                    }
+                    
+                    // Check for files after scaffold step
+                    if (stepId === 'scaffoldProject') {
+                      await checkForFiles();
+                      onProgress(fullText, generatedFiles);
+                    }
+                  }
+                  else if (status === 'failed') {
+                    // Step failed
+                    fullText += `Error in step: ${stepId}\n`;
+                    onProgress(fullText, generatedFiles);
+                  }
+                }
+                else if (jsonData.type === 'workflow') {
+                  // The workflow status has changed
+                  const status = jsonData.status;
+                  
+                  if (status === 'COMPLETED') {
+                    workflowComplete = true;
+                    fullText += '\nProject initialization completed successfully!\n';
+                    // Final check for files
+                    await checkForFiles();
+                    onProgress(fullText, generatedFiles);
+                  }
+                  else if (status === 'FAILED') {
+                    fullText += '\nProject initialization failed.\n';
+                    onProgress(fullText, generatedFiles);
+                  }
+                }
               } catch (e) {
-                console.error('Error parsing message ID:', e);
-              }
-            }
-            // Process text fragments (format: 0:"text fragment")
-            else if (line.startsWith('0:')) {
-              // Extract the text content between quotes
-              const match = line.match(/0:"(.*)"/);
-              if (match && match[1]) {
-                textFragments.push(match[1]);
-                fullText = textFragments.join('');
-                onProgress(fullText, generatedFiles);
-              }
-            }
-            // Process completion info (format: e:{"finishReason":"stop","usage":{...}})
-            else if (line.startsWith('e:')) {
-              try {
-                // End marker detected (silent in production)
-                // Allow some extra time for file generation
-                await new Promise(resolve => setTimeout(resolve, 2000));
-                await checkForFiles(); // Do a final check for files
-              } catch (e) {
-                console.error('Error processing end marker:', e);
+                console.error('Error parsing event data:', e);
               }
             }
           }
         }
       } finally {
-        // Clean up interval
-        clearInterval(fileCheckTimer);
+        clearInterval(fileCheckInterval);
       }
       
-      // Wait a bit longer for files to be generated if they haven't been yet
-      if (generatedFiles.length === 0) {
-        // Wait silently for async file generation
-        // Wait for 10 seconds, checking every 2 seconds
-        for (let i = 0; i < 5; i++) {
-          await new Promise(resolve => setTimeout(resolve, 2000));
-          const filesFound = await checkForFiles();
-          if (filesFound) {
-            console.log('Files found after waiting!'); 
-            break;
-          }
-        }
-      }
-      
-      // Debug summary
-      console.log(`Stream processing complete: ${lineCount} lines`);
-      console.log(`Reconstructed text: ${fullText.slice(0, 100)}${fullText.length > 100 ? '...' : ''}`);
-      console.log(`Generated files count: ${generatedFiles.length}`);
-      
-      // Return the complete response
+      // Return the final response
       return {
         success: true,
         data: {

@@ -14,6 +14,9 @@ import { deployerAgent } from "./agents/deployer.agent";
 // Import tools
 import { delegateToAgentTool } from "./tools/agent-delegation.tool";
 
+// Import workflow
+import { projectGenerationWorkflow } from "./workflows";
+
 /**
  * Main Mastra instance for hack-helper
  * This configures all agents and their dependencies
@@ -29,6 +32,10 @@ export const mastra: Mastra = new Mastra({
     featureEnhancerAgent,
     boardPublisherAgent,
     deployerAgent,
+  },
+  workflows: {
+    // Workflows
+    projectGenerationWorkflow,
   },
   storage: new LibSQLStore({
     url: "file:../mastra.db", // Using persistent storage for the project
